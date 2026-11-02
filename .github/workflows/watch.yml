@@ -1,0 +1,24 @@
+name: dap-watch
+on:
+  schedule: [{cron: "*/4 * * * *"}]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: dap
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - run: python watch.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      - if: always()
+        run: |
+          git config user.name  "dap-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state.json && git diff --staged --quiet || git commit -m "state"
+          git push

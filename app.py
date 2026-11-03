@@ -1,8 +1,8 @@
 import json, os, re, threading, time, random, requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-NTFY     = os.environ.get("NTFY_TOPIC", "evikash-token-dap-hack11xgdhd")
-FTYPE    = 1                 # DAP
+NTFY     = os.environ.get("NTFY_TOPIC", "mpdap-3859-3856-7k2x9")
+FTYPE    = 1
 TARGETS  = [3859, 3856]
 INTERVAL = 10
 STATE    = "/tmp/state.json"
@@ -24,11 +24,14 @@ def log(m): print(time.strftime("%H:%M:%S"), m, flush=True)
 
 def push(title, msg):
     try:
-        S.post(f"https://ntfy.sh/{NTFY}", data=msg.encode(), timeout=20,
-               headers={"Title": title, "Priority": "max", "Tags": "rotating_light",
-                        "Click": "https://evikas.mpkrishi.mp.gov.in/FarmerProfile/FarmerProfileManagement"})
+        r = S.post(f"https://ntfy.sh/{NTFY}", data=msg.encode(), timeout=20,
+                   headers={"Title": title, "Priority": "max", "Tags": "rotating_light",
+                            "Click": "https://evikas.mpkrishi.mp.gov.in/FarmerProfile/FarmerProfileManagement"})
+        log(f"push '{title}' -> {r.status_code} topic={NTFY} body={r.text[:120]}")
+        return r.status_code
     except Exception as e:
-        log(f"push fail: {e}")
+        log(f"push EXCEPTION: {e}")
+        return 0
 
 def walk(o):
     if isinstance(o, dict):
@@ -54,25 +57,30 @@ def fetch(block):
     r.raise_for_status()
     return r.json()
 
-def serve():
-    class H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"ok")
-        def log_message(self, *a): pass
-    HTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), H).serve_forever()
+def snapshot():
+    nxt, hits = {}, []
+    for i, block in enumerate(TARGETS):
+        if i: time.sleep(4)
+        try:
+            parsed = parse(fetch(block))
+        except Exception as e:
+            log(f"block {block} fail: {e}"); continue
+        log(f"block {block}: {len(parsed)} retailers")
+        for retailer, fields in parsed.items():
+            for f, val in fields.items():
+                nxt[f"{block}|{retailer}|{f}"] = val
+    return nxt
 
 def main():
     state, fails = None, 0
+    log(f"START topic={NTFY} ftype={FTYPE} targets={TARGETS}")
+    push("Watcher started", "Service booted. Baseline next.")
     while True:
         nxt, hits, ok = {}, [], False
         for i, block in enumerate(TARGETS):
             if i: time.sleep(4)
             try:
-                parsed = parse(fetch(block))
-                ok = True
+                parsed = parse(fetch(block)); ok = True
             except Exception as e:
                 log(f"block {block} fail: {e}"); continue
             log(f"block {block}: {len(parsed)} retailers")
@@ -91,9 +99,11 @@ def main():
                     if key.startswith(f"{block}|") and key not in nxt:
                         hits.append(f"GONE — {key.split('|')[1]} (was {prev})")
         if state is None:
-            push("Watcher started", f"{len(nxt)} fields baseline. Alerts live.")
+            live = [k for k, v in nxt.items() if v and v > 0]
+            push("Baseline saved", f"{len(nxt)} fields, {len(live)} non-zero:\n" +
+                 "\n".join(live[:15]))
         elif hits:
-            push(f"DAP CHANGE ({len(hits)})", "\n\n".join(hits)); log(f"ALERT x{len(hits)}")
+            push(f"DAP CHANGE ({len(hits)})", "\n\n".join(hits))
         if ok:
             state, fails = nxt, 0
         else:
@@ -101,5 +111,24 @@ def main():
             if fails == 3: push("e-Vikas poll failed", "Both blocks failing.")
         time.sleep(INTERVAL + random.uniform(-2, 2))
 
-threading.Thread(target=serve, daemon=True).start()
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/test"):
+            code = push("TEST PUSH", "If you see this, the notification path works.")
+            body = f"push status {code} topic {NTFY}".encode()
+        elif self.path.startswith("/debug"):
+            try:
+                r = S.post(URL.format(b=3859, f=FTYPE), timeout=30)
+                body = f"HTTP {r.status_code}\nparsed={len(parse(r.json()))}\n\n{r.text[:1500]}".encode()
+            except Exception as e:
+                body = f"EXCEPTION {e}".encode()
+        else:
+            body = b"ok"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a): pass
+
+threading.Thread(target=lambda: HTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), H).serve_forever(), daemon=True).start()
 main()

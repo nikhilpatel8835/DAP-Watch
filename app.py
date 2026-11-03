@@ -1,8 +1,8 @@
 import json, os, re, threading, time, random, requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-NTFY     = os.environ.get("NTFY_TOPIC", "mpdap-3859-3856-7k2x9")
-FTYPE    = 1
+NTFY     = os.environ.get("NTFY_TOPIC", "evikash-token-dap-hack11xgdhd")
+FTYPE    = 1                  # DAP
 TARGETS  = [3859, 3856]
 INTERVAL = 10
 STATE    = "/tmp/state.json"
@@ -27,7 +27,7 @@ def push(title, msg):
         r = S.post(f"https://ntfy.sh/{NTFY}", data=msg.encode(), timeout=20,
                    headers={"Title": title, "Priority": "max", "Tags": "rotating_light",
                             "Click": "https://evikas.mpkrishi.mp.gov.in/FarmerProfile/FarmerProfileManagement"})
-        log(f"push '{title}' -> {r.status_code} topic={NTFY} body={r.text[:120]}")
+        log(f"push '{title}' -> {r.status_code} body={r.text[:100]}")
         return r.status_code
     except Exception as e:
         log(f"push EXCEPTION: {e}")
@@ -57,24 +57,10 @@ def fetch(block):
     r.raise_for_status()
     return r.json()
 
-def snapshot():
-    nxt, hits = {}, []
-    for i, block in enumerate(TARGETS):
-        if i: time.sleep(4)
-        try:
-            parsed = parse(fetch(block))
-        except Exception as e:
-            log(f"block {block} fail: {e}"); continue
-        log(f"block {block}: {len(parsed)} retailers")
-        for retailer, fields in parsed.items():
-            for f, val in fields.items():
-                nxt[f"{block}|{retailer}|{f}"] = val
-    return nxt
-
 def main():
     state, fails = None, 0
     log(f"START topic={NTFY} ftype={FTYPE} targets={TARGETS}")
-    push("Watcher started", "Service booted. Baseline next.")
+    push("Watcher started", "Service booted, baseline next.")
     while True:
         nxt, hits, ok = {}, [], False
         for i, block in enumerate(TARGETS):
@@ -100,8 +86,7 @@ def main():
                         hits.append(f"GONE — {key.split('|')[1]} (was {prev})")
         if state is None:
             live = [k for k, v in nxt.items() if v and v > 0]
-            push("Baseline saved", f"{len(nxt)} fields, {len(live)} non-zero:\n" +
-                 "\n".join(live[:15]))
+            push("Baseline saved", f"{len(nxt)} fields, {len(live)} non-zero:\n" + "\n".join(live[:15]))
         elif hits:
             push(f"DAP CHANGE ({len(hits)})", "\n\n".join(hits))
         if ok:
@@ -114,7 +99,7 @@ def main():
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/test"):
-            code = push("TEST PUSH", "If you see this, the notification path works.")
+            code = push("TEST PUSH", "If you see this, notification path works.")
             body = f"push status {code} topic {NTFY}".encode()
         elif self.path.startswith("/debug"):
             try:
